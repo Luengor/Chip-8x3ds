@@ -35,22 +35,22 @@ byte DT = 0, ST = 0, SP;
 int main(int argc, char **argv)
 {
     // Init gfx
-	gfxInitDefault();
+    gfxInitDefault();
 
     // Console on bottom screen
-	consoleInit(GFX_BOTTOM, NULL);
+    consoleInit(GFX_BOTTOM, NULL);
 
     // Disable buffer swaping and get buffer
     gfxSetDoubleBuffering(GFX_TOP, false);
     u8* fb = gfxGetFramebuffer(GFX_TOP, GFX_LEFT, NULL, NULL);
 
 
-	// Main loop
+    // Main loop
     word instruction;
     memory[PC] = 0x00;
     memory[PC+1] = 0xe0;
-	while (aptMainLoop())
-	{
+    while (aptMainLoop())
+    {
         // Fetch
         instruction = memory[PC];
         instruction <<= 8;
@@ -82,8 +82,8 @@ int main(int argc, char **argv)
 
         // Wait for VBlank
         gspWaitForVBlank();
-	}
+    }
 
-	gfxExit();
-	return 0;
+    gfxExit();
+    return 0;
 }
