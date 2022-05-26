@@ -1,4 +1,5 @@
 build/
+roms/
 *.3dsx
 *.elf
 *.smdh
