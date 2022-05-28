@@ -30,20 +30,33 @@ byte memory[4096] =
 byte registers[16];
 
 word I, PC = 0x200;
-byte DT = 0, ST = 0, SP;
+byte DT = 0, ST = 0, C = 0xFF, SP;
 
 
-bool XORpixel(u8* fb, unsigned int x, unsigned int y)
+bool XORpixel(u8* fb, int x, int y)
 {
-    unsigned int n = (  + (x*6 * 240 + (240 - (y - 1)*6))) * 3;
-    bool xored = fb[n] == 255;
+    x %= 64;
+    y %= 32;
+    x = (x * 6) + 6;
+    y = (y * 6) + 22;
+    int n = (240 * x + (240 - y)) * 3;
+    bool xored = (fb[n] + fb[n+1] + fb[n+2]) != 0;
 
     for (int i = 0; i < 6; i++)
     {
         for (int j = 0; j < 6; j++)
         {
-            unsigned int _n = n + 3 * (i + (j*240)); 
-            fb[_n] = fb[_n + 1] = fb[_n + 2] = (!xored) * 255;
+            int _n = n + 3 * (i + (j*240)); 
+            if (xored)
+                fb[_n] = fb[_n + 1] = fb[_n + 2] = 0;
+            else
+            {
+                // C: rrrggbbb
+                fb[_n + 2] = (int)((C >> 5) / 7.0 * 255);
+                fb[_n + 1] = (int)(((C & 0x18) >> 4) / 3.0 * 255);
+                fb[_n] = (int)((C & 0x07) / 7.0 * 255);
+
+            }
         }
     }
 
@@ -116,7 +129,7 @@ int main(int argc, char **argv)
         
         // Exit if start is holded
         if (kheld & KEY_START)
-            break;
+            running = false;
 
 
         // Big boi
@@ -137,6 +150,9 @@ int main(int argc, char **argv)
 
                     case 0x00EE:            // RET
                         printf("RET\n");
+                        PC = memory[SP--];
+                        PC <<= 8;
+                        PC += memory[SP--];
                         break;
 
 quit:               case 0x00FD:            // EXIT
@@ -154,8 +170,8 @@ quit:               case 0x00FD:            // EXIT
             case 0x2000:                // CALL nnn 
                 printf("CALL %04hx\n", nnn);
                 SP += 1;
-                memory[SP++] = PC >> 8;
-                memory[SP]   = PC & 0x00FF;
+                memory[SP++] = PC & 0x00FF;
+                memory[SP]   = PC >> 8;
                 PC = nnn;
                 break;
 
@@ -184,7 +200,59 @@ quit:               case 0x00FD:            // EXIT
                 registers[x] += kk;
                 break;
 
-            case 0x8000:                // TODO
+            case 0x8000:
+                switch (instruction & 0x000F)
+                {
+                    case 0x0000:        // LD Vx, Vy
+                        printf("LD V%hx, V%hx\n", x, y);
+                        registers[x] = registers[y];
+                        break;
+
+                    case 0x0001:        // OR Vx, Vy
+                        printf("OR V%hx, V%hx\n", x, y);
+                        registers[x] |= registers[y];
+                        break;
+
+                    case 0x0002:        // AND Vx, Vy
+                        printf("AND V%hx, V%hx\n", x, y);
+                        registers[x] &= registers[y];
+                        break;
+
+                    case 0x0003:        // XOR Vx, Vy
+                        printf("XOR V%hx, V%hx\n", x, y);
+                        registers[x] ^=registers[y];
+                        break;
+
+                    case 0x0004:        // ADD Vx, Vy
+                        printf("ADD V%hx, V%hx\n", x, y);
+                        registers[0xF] = ((registers[x] + registers[y]) < registers[x]);
+                        registers[x] += registers[y];
+                        break;
+
+                    case 0x0005:        // SUB Vx, Vy
+                        printf("SUB V%hx, V%hx\n", x, y);
+                        registers[0xF] = registers[x] > registers[y];
+                        registers[x] -= registers[y];
+                        break;
+
+                    case 0x0006:        // SHR Vx, Vy
+                        printf("SHR V%hx {, V%hx}\n", x, y);
+                        registers[0xF] = registers[x] & 0x01;
+                        registers[x] /= 2;
+                        break;
+
+                    case 0x0007:        // SUBN Vx, Vy
+                        printf("SUBN V%hx, V%hx\n", x, y);
+                        registers[0xF] = registers[x] < registers[y];
+                        registers[x] = registers[y] - registers[x];
+                        break;
+
+                    case 0x000E:        // SHL Vx, Vy
+                        printf("SHL V%hx {, V%hx}\n", x, y);
+                        registers[0xF] = (registers[x] >> 7) & 0x01;
+                        registers[x] *= 2;
+                        break;
+                }
                 break;
 
             case 0x9000:                // SNE Vx, Vy
@@ -244,6 +312,11 @@ quit:               case 0x00FD:            // EXIT
                         ST = registers[x];
                         break;
 
+                    case 0x001B:        // LD C, Vx
+                        printf("LD C, V%hx\n", x);
+                        C = registers[x];
+                        break;
+
                     case 0x001E:        // ADD I, Vx
                         printf("ADD I, V%hx\n", x);
                         I += registers[x];
@@ -281,7 +354,7 @@ quit:               case 0x00FD:            // EXIT
         gspWaitForVBlank();
     }
 
-    WaitKey(0xFFFFFFFF);
+    WaitKey(KEY_SELECT);
     gfxExit();
     return 0;
 }
