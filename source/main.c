@@ -3,10 +3,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-typedef unsigned char byte;
-typedef unsigned short word;
+u32 KEY_MOD = KEY_R | KEY_L; 
+u32 key_map[] = {KEY_DDOWN, KEY_DUP, KEY_DRIGHT, KEY_X, KEY_LEFT, KEY_DUP, KEY_DRIGHT, KEY_X, KEY_DLEFT, KEY_Y, KEY_A, KEY_B, KEY_A, KEY_B};
+uint16_t mod_keys = 0x81F3; // 1000000111110011 
 
-byte memory[4096] = 
+uint8_t memory[4096] = 
 {
     0xF0, 0x90, 0x90, 0x90, 0xF0,
     0x20, 0x60, 0x20, 0x20, 0x70,
@@ -27,10 +28,10 @@ byte memory[4096] =
 };
 
 
-byte registers[16];
+uint8_t registers[16];
 
-word I, PC = 0x200;
-byte DT = 0, ST = 0, C = 0xFF, SP;
+uint16_t I, PC = 0x200;
+uint8_t DT = 0, ST = 0, C = 0xFF, SP;
 
 
 bool XORpixel(u8* fb, int x, int y)
@@ -52,9 +53,9 @@ bool XORpixel(u8* fb, int x, int y)
             else
             {
                 // C: rrrggbbb
-                fb[_n + 2] = (int)((C >> 5) / 7.0 * 255);
-                fb[_n + 1] = (int)(((C & 0x18) >> 4) / 3.0 * 255);
-                fb[_n] = (int)((C & 0x07) / 7.0 * 255);
+                fb[_n + 2] = (int)(((C >> 5) & 7) / 7.0 * 255);
+                fb[_n + 1] = (int)(((C >> 3) & 3) / 3.0 * 255);
+                fb[_n] =     (int)(((C >> 0) & 7) / 7.0 * 255);
 
             }
         }
@@ -63,7 +64,7 @@ bool XORpixel(u8* fb, int x, int y)
     return xored;
 }
 
-void WaitKey(u32 key_mask)
+u32 WaitKey(u32 key_mask)
 {
     u32 dkeys;
 
@@ -72,6 +73,28 @@ void WaitKey(u32 key_mask)
         hidScanInput();
         dkeys = hidKeysDown();
     } while (!(dkeys & key_mask));
+
+    return dkeys;
+}
+
+u8 MapKey(u32 key_mask)
+{
+    uint16_t shifted_mask = key_mask;
+    uint8_t key_masked;
+    bool modded;
+
+    for (uint8_t i = 0; i < 16; i++)
+    {
+        key_masked = (key_map[15 - i] & key_mask);
+        modded = key_masked % 2;
+
+        if (((key_masked == 0) && !modded) || ((key_masked & mod_keys) && modded))
+            return i;
+
+        shifted_mask >>= 1;
+    }
+
+    return 0;
 }
 
 
@@ -99,9 +122,9 @@ int main(int argc, char **argv)
 
 
     // Main loop
-    word instruction;
-    word nnn;
-    byte n, x, y, kk;
+    uint16_t instruction;
+    uint16_t nnn;
+    uint8_t n, x, y, kk;
     bool running = true;
 
     while (aptMainLoop() && running)
@@ -130,7 +153,7 @@ int main(int argc, char **argv)
         // Exit if start is holded
         if (kheld & KEY_START)
             running = false;
-
+        
 
         // Big boi
         switch (instruction & 0xF000)
@@ -270,7 +293,9 @@ quit:               case 0x00FD:            // EXIT
                 PC = nnn + registers[0];
                 break;
 
-            case 0xC000:                // RND Vx, kk  TODO
+            case 0xC000:                // RND Vx, kk
+                printf("RND V%hx, %d\n", x, kk);
+                registers[x] = (rand() % 0x100) & kk;
                 break;
 
             case 0xD000:                // DRW Vx, Vy, n
@@ -278,7 +303,7 @@ quit:               case 0x00FD:            // EXIT
                 registers[0xF] = 0;
                 for (int _y = 0; _y < n; _y++)
                 {
-                    byte b = memory[I + _y];
+                    uint8_t b = memory[I + _y];
                     for (int _x = 7; _x >= 0; _x--, b>>=1)
                     {
                         if (b % 2 == 0) continue;
@@ -288,7 +313,20 @@ quit:               case 0x00FD:            // EXIT
                 }
                 break;
 
-            case 0xE000:                // TODO
+            case 0xE000:
+                switch (instruction & 0x00FF)
+                {
+                    case 0x0095:        // SKP Vx
+                        printf("SKP V%hx", x);
+                        PC += 2 * (registers[x] == MapKey(kheld));
+                        break;
+
+                    case 0x00A1:        // SKNP Vx
+                        printf("SKNP V%hx", x);
+                        PC += 2 * (registers[x] != MapKey(kheld));
+                        break;
+                }
+                
                 break;
 
             case 0xF000:
@@ -299,7 +337,10 @@ quit:               case 0x00FD:            // EXIT
                         registers[x] = DT;
                         break;
 
-                    case 0x000A:        // LD Vx, K    TODO
+                    case 0x000A:        // LD Vx, K
+                        printf("LD V%hx\n, K", x);
+                        kheld = WaitKey(0xFFFFFFFF);
+                        registers[x] = MapKey(kheld);
                         break;
 
                     case 0x0015:        // LD DT, Vx
@@ -327,22 +368,29 @@ quit:               case 0x00FD:            // EXIT
                         I = registers[x] * 5;
                         break;
 
-                    case 0x0033:        // LD B, Vx  TODO
+                    case 0x0033:        // LD B, Vx
                         printf("LD B, V%hx\n", x);
-                        break; // BCD or something
+                        memory[I] = registers[x] / 100;
+                        memory[I+1] = registers[x] / 10 % 10;
+                        memory[I+2] = registers[x] % 10;
+                        break;
                     
                     case 0x0055:        // LD [I], Vx
                         printf("LD [I], V%hx\n", x);
-                        for (int i = 0; i <= x; i++, memory[I + i] = registers[i]);
+                        for (uint8_t i = 0; i <= x; memory[I + i] = registers[i], i++);
                         break;
 
                     case 0x0065:        // LD Vx, [I]
                         printf("LD V%hx, [I]\n", x);
-                        for (int i = 0; i <= x; i++, registers[i] = memory[I + i]);
+                        for (uint8_t i = 0; i <= x; registers[i] = memory[I + i], i++);
                         break;
 
                 }
                 break;
+
+            default:
+                printf("Invalid opcode: %hx", instruction);
+                goto quit;
         }
 
 
