@@ -33,9 +33,10 @@ def read_n(n):
         return int(n)
 labels = {}
 lines_to_resolve = []
+line_offset = 0
 
 
-## The good stuff
+## The assembler itself
 for l, line in enumerate(text):
     # Remove contents if any
     if '#' in line:
@@ -46,14 +47,24 @@ for l, line in enumerate(text):
     parts = line.split(" ")
 
     # Empty line
-    if len(parts) == 0 or parts[0] == '': continue
+    if len(parts) == 0 or parts[0] == '':
+        line_offset += 1
+        continue
 
     # Label 
     if parts[0].endswith(":"):
         labels[parts.pop(0)[:-1]] = 512 + len(output)
 
     # Empty now?
-    if len(parts) == 0: continue;
+    if len(parts) == 0:
+        line_offset += 1
+        continue
+
+    # Check if its raw hex
+    if parts[0].startswith("0x"):
+        for byte in parts:
+            output.append(int(byte, base=16))
+        continue
 
     # Get instruction 
     opcode = parts.pop(0).upper()
@@ -61,6 +72,7 @@ for l, line in enumerate(text):
     if len(parts): operand = "".join(parts)
     op = operand.split(',')
 
+    # Match instruction
     match opcode:
         case "CLS":
             outadd(0x00E0)
@@ -76,14 +88,14 @@ for l, line in enumerate(text):
                 outadd(0x1000 + read_n(operand)) 
             else:
                 outadd(0x1000)
-                lines_to_resolve.append([l, operand])
+                lines_to_resolve.append([l - line_offset, operand])
 
         case "CALL":
             if operand.isnumeric():
                 outadd(0x2000 + read_n(operand))
             else:
                 outadd(0x2000)
-                lines_to_resolve.append([l, operand])
+                lines_to_resolve.append([l - line_offset, operand])
 
         case "SE":
             if op[1].startswith('V'):
@@ -104,8 +116,11 @@ for l, line in enumerate(text):
 
             # Annn - LD I, nnn
             elif op[0] == 'I':
-                I = read_n(op[1])
-                outadd(0xA000 + I)
+                if op[1].isnumeric():
+                    outadd(0xA000 + read_n(op[1])) 
+                else:
+                    outadd(0xA000)
+                    lines_to_resolve.append([l - line_offset, op[1]])
 
             # Fx15 - LD DT, Vx
             elif op[0] == 'DT':
