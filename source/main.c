@@ -27,7 +27,6 @@ uint8_t memory[4096] =
     0xF0, 0x80, 0xF0, 0x80, 0x80,
 };
 
-
 uint8_t registers[16];
 
 uint16_t I, PC = 0x200;
@@ -103,9 +102,6 @@ int main(int argc, char **argv)
     // Init gfx
     gfxInitDefault();
 
-    // Console on bottom screen
-    consoleInit(GFX_BOTTOM, NULL);
-
     // Disable buffer swaping and get buffer
     gfxSetDoubleBuffering(GFX_TOP, false);
     u8* fb = gfxGetFramebuffer(GFX_TOP, GFX_LEFT, NULL, NULL);
@@ -120,6 +116,9 @@ int main(int argc, char **argv)
     fread(memory + PC, 1, size, file);
     fclose(file);
 
+    // Log file
+    FILE *log = fopen("chip8.log", "w");
+    if (log == NULL) goto quit;
 
     // Main loop
     uint16_t instruction;
@@ -143,8 +142,8 @@ int main(int argc, char **argv)
         // Increment PC
         PC+= 2;
 
-        // Print instruction in bottom screen 
-        printf("0x%04hx  %04hx  ", PC, instruction);
+        // Print instruction to log 
+        fprintf(log, "0x%04hx  %04hx  ", PC, instruction);
 
         // Read frame input
         hidScanInput();
@@ -162,36 +161,36 @@ int main(int argc, char **argv)
                 switch (instruction & 0x00FF)
                 {
                     case 0x0000:            // NULL
-                        printf("NULL\n");
+                        fprintf(log, "NULL\n");
                         break;
 
                     case 0x00E0:            // CLS
-                        printf("CLS\n");
+                        fprintf(log, "CLS\n");
                         for (int i = 0; i < 400*240; i++)
                             fb[i] = fb[i + 1] = fb[i + 2] = 0;
                         break;
 
                     case 0x00EE:            // RET
-                        printf("RET\n");
+                        fprintf(log, "RET\n");
                         PC = memory[SP--];
                         PC <<= 8;
                         PC += memory[SP--];
                         break;
 
-quit:               case 0x00FD:            // EXIT
-                        printf("EXIT\n");
+                    case 0x00FD:            // EXIT
+                        fprintf(log, "EXIT\n");
                         running = false;
                         break;
                 }
                 break;
 
             case 0x1000:                // JP nnn 
-                printf("JP %04hx\n", nnn);
+                fprintf(log, "JP %04hx\n", nnn);
                 PC = nnn;
                 break;
 
             case 0x2000:                // CALL nnn 
-                printf("CALL %04hx\n", nnn);
+                fprintf(log, "CALL %04hx\n", nnn);
                 SP += 1;
                 memory[SP++] = PC & 0x00FF;
                 memory[SP]   = PC >> 8;
@@ -199,27 +198,27 @@ quit:               case 0x00FD:            // EXIT
                 break;
 
             case 0x3000:                // SE Vx, kk 
-                printf("SE V%hx, %hd\n", x, kk);
+                fprintf(log, "SE V%hx, %hd\n", x, kk);
                 PC += 2 * (registers[x] == kk);
                 break;
 
             case 0x4000:                // SNE Vx, kk
-                printf("SNE V%hx, %hd\n", x, kk);
+                fprintf(log, "SNE V%hx, %hd\n", x, kk);
                 PC += 2 * (registers[x] != kk);
                 break;
 
             case 0x5000:                // SE Vx, Vy
-                printf("SE V%hx, V%hx\n", x, y);
+                fprintf(log, "SE V%hx, V%hx\n", x, y);
                 PC += 2 * (registers[x] == registers[y]);
                 break;
 
             case 0x6000:                // LD Vx, kk
-                printf("LD V%hx, %hd\n", x, kk);
+                fprintf(log, "LD V%hx, %hd\n", x, kk);
                 registers[x] = kk;
                 break;
 
             case 0x7000:                // ADD Vx, kk
-                printf("ADD V%hx, %hd\n", x, kk);
+                fprintf(log, "ADD V%hx, %hd\n", x, kk);
                 registers[x] += kk;
                 break;
 
@@ -227,51 +226,51 @@ quit:               case 0x00FD:            // EXIT
                 switch (instruction & 0x000F)
                 {
                     case 0x0000:        // LD Vx, Vy
-                        printf("LD V%hx, V%hx\n", x, y);
+                        fprintf(log, "LD V%hx, V%hx\n", x, y);
                         registers[x] = registers[y];
                         break;
 
                     case 0x0001:        // OR Vx, Vy
-                        printf("OR V%hx, V%hx\n", x, y);
+                        fprintf(log, "OR V%hx, V%hx\n", x, y);
                         registers[x] |= registers[y];
                         break;
 
                     case 0x0002:        // AND Vx, Vy
-                        printf("AND V%hx, V%hx\n", x, y);
+                        fprintf(log, "AND V%hx, V%hx\n", x, y);
                         registers[x] &= registers[y];
                         break;
 
                     case 0x0003:        // XOR Vx, Vy
-                        printf("XOR V%hx, V%hx\n", x, y);
+                        fprintf(log, "XOR V%hx, V%hx\n", x, y);
                         registers[x] ^=registers[y];
                         break;
 
                     case 0x0004:        // ADD Vx, Vy
-                        printf("ADD V%hx, V%hx\n", x, y);
+                        fprintf(log, "ADD V%hx, V%hx\n", x, y);
                         registers[0xF] = ((registers[x] + registers[y]) < registers[x]);
                         registers[x] += registers[y];
                         break;
 
                     case 0x0005:        // SUB Vx, Vy
-                        printf("SUB V%hx, V%hx\n", x, y);
+                        fprintf(log, "SUB V%hx, V%hx\n", x, y);
                         registers[0xF] = registers[x] > registers[y];
                         registers[x] -= registers[y];
                         break;
 
                     case 0x0006:        // SHR Vx, Vy
-                        printf("SHR V%hx {, V%hx}\n", x, y);
+                        fprintf(log, "SHR V%hx {, V%hx}\n", x, y);
                         registers[0xF] = registers[x] & 0x01;
                         registers[x] /= 2;
                         break;
 
                     case 0x0007:        // SUBN Vx, Vy
-                        printf("SUBN V%hx, V%hx\n", x, y);
+                        fprintf(log, "SUBN V%hx, V%hx\n", x, y);
                         registers[0xF] = registers[x] < registers[y];
                         registers[x] = registers[y] - registers[x];
                         break;
 
                     case 0x000E:        // SHL Vx, Vy
-                        printf("SHL V%hx {, V%hx}\n", x, y);
+                        fprintf(log, "SHL V%hx {, V%hx}\n", x, y);
                         registers[0xF] = (registers[x] >> 7) & 0x01;
                         registers[x] *= 2;
                         break;
@@ -279,27 +278,27 @@ quit:               case 0x00FD:            // EXIT
                 break;
 
             case 0x9000:                // SNE Vx, Vy
-                printf("SNE V%hx, V%hx\n", x, y);
+                fprintf(log, "SNE V%hx, V%hx\n", x, y);
                 PC += 2 * (registers[x] != registers[y]);
                 break;
                 
             case 0xA000:                // LD I, nnn
-                printf("LD I, %04hx\n", nnn);
+                fprintf(log, "LD I, %04hx\n", nnn);
                 I = nnn;
                 break;
 
             case 0xB000:                // JP V0, nnn
-                printf("JP V0, %04hx\n", nnn);
+                fprintf(log, "JP V0, %04hx\n", nnn);
                 PC = nnn + registers[0];
                 break;
 
             case 0xC000:                // RND Vx, kk
-                printf("RND V%hx, %d\n", x, kk);
+                fprintf(log, "RND V%hx, %d\n", x, kk);
                 registers[x] = (rand() % 0x100) & kk;
                 break;
 
             case 0xD000:                // DRW Vx, Vy, n
-                printf("DRW V%hx, V%hx, %d\n", x, y, n);
+                fprintf(log, "DRW V%hx, V%hx, %d\n", x, y, n);
                 registers[0xF] = 0;
                 for (int _y = 0; _y < n; _y++)
                 {
@@ -317,12 +316,12 @@ quit:               case 0x00FD:            // EXIT
                 switch (instruction & 0x00FF)
                 {
                     case 0x0095:        // SKP Vx
-                        printf("SKP V%hx", x);
+                        fprintf(log, "SKP V%hx", x);
                         PC += 2 * (registers[x] == MapKey(kheld));
                         break;
 
                     case 0x00A1:        // SKNP Vx
-                        printf("SKNP V%hx", x);
+                        fprintf(log, "SKNP V%hx", x);
                         PC += 2 * (registers[x] != MapKey(kheld));
                         break;
                 }
@@ -333,55 +332,55 @@ quit:               case 0x00FD:            // EXIT
                 switch (instruction & 0x00FF)
                 {
                     case 0x0007:        // LD Vx, DT
-                        printf("LD V%hx, DT\n", x);
+                        fprintf(log, "LD V%hx, DT\n", x);
                         registers[x] = DT;
                         break;
 
                     case 0x000A:        // LD Vx, K
-                        printf("LD V%hx\n, K", x);
+                        fprintf(log, "LD V%hx\n, K", x);
                         kheld = WaitKey(0xFFFFFFFF);
                         registers[x] = MapKey(kheld);
                         break;
 
                     case 0x0015:        // LD DT, Vx
-                        printf("LD DT, V%hx\n", x);
+                        fprintf(log, "LD DT, V%hx\n", x);
                         DT = registers[x];
                         break;
 
                     case 0x0018:        // LD ST, Vx
-                        printf("LD ST, V%hx\n", x);
+                        fprintf(log, "LD ST, V%hx\n", x);
                         ST = registers[x];
                         break;
 
                     case 0x001B:        // LD C, Vx
-                        printf("LD C, V%hx\n", x);
+                        fprintf(log, "LD C, V%hx\n", x);
                         C = registers[x];
                         break;
 
                     case 0x001E:        // ADD I, Vx
-                        printf("ADD I, V%hx\n", x);
+                        fprintf(log, "ADD I, V%hx\n", x);
                         I += registers[x];
                         break;
 
                     case 0x0029:        // LD F, Vx
-                        printf("LD F, V%hx\n", x);
+                        fprintf(log, "LD F, V%hx\n", x);
                         I = registers[x] * 5;
                         break;
 
                     case 0x0033:        // LD B, Vx
-                        printf("LD B, V%hx\n", x);
+                        fprintf(log, "LD B, V%hx\n", x);
                         memory[I] = registers[x] / 100;
                         memory[I+1] = registers[x] / 10 % 10;
                         memory[I+2] = registers[x] % 10;
                         break;
                     
                     case 0x0055:        // LD [I], Vx
-                        printf("LD [I], V%hx\n", x);
+                        fprintf(log, "LD [I], V%hx\n", x);
                         for (uint8_t i = 0; i <= x; memory[I + i] = registers[i], i++);
                         break;
 
                     case 0x0065:        // LD Vx, [I]
-                        printf("LD V%hx, [I]\n", x);
+                        fprintf(log, "LD V%hx, [I]\n", x);
                         for (uint8_t i = 0; i <= x; registers[i] = memory[I + i], i++);
                         break;
 
@@ -389,7 +388,7 @@ quit:               case 0x00FD:            // EXIT
                 break;
 
             default:
-                printf("Invalid opcode: %hx", instruction);
+                fprintf(log, "Invalid opcode: %hx", instruction);
                 goto quit;
         }
 
@@ -401,7 +400,9 @@ quit:               case 0x00FD:            // EXIT
         // Wait for VBlank
         gspWaitForVBlank();
     }
+    fclose(log);
 
+quit:
     WaitKey(KEY_SELECT);
     gfxExit();
     return 0;
