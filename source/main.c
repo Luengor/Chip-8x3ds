@@ -2,10 +2,15 @@
 #include <3ds.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <citro2d.h>
 
-u32 KEY_MOD = KEY_R | KEY_L; 
-u32 key_map[] = {KEY_DDOWN, KEY_DUP, KEY_DRIGHT, KEY_X, KEY_LEFT, KEY_DUP, KEY_DRIGHT, KEY_X, KEY_DLEFT, KEY_Y, KEY_A, KEY_B, KEY_A, KEY_B};
-uint16_t mod_keys = 0x81F3; // 1000000111110011 
+
+u_int8_t keymap[17] = {
+    0x1, 0x2, 0x3, 0xC,
+    0x4, 0x5, 0x6, 0xD,
+    0x7, 0x8, 0x9, 0xE,
+    0xA, 0x0, 0xB, 0xF,
+};
 
 uint8_t memory[4096] = 
 {
@@ -63,37 +68,34 @@ bool XORpixel(u8* fb, int x, int y)
     return xored;
 }
 
-u32 WaitKey(u32 key_mask)
+u_int8_t WaitKey()
 {
-    u32 dkeys;
+    touchPosition pos;
+    uint8_t key;
 
     do
     {
         hidScanInput();
-        dkeys = hidKeysDown();
-    } while (!(dkeys & key_mask));
+        hidTouchRead(&pos);
+    } while (pos.px == 0 && pos.py == 0);
+    key = pos.px / 80 + (pos.py / 60) * 4;
 
-    return dkeys;
+    return keymap[key];
 }
 
-u8 MapKey(u32 key_mask)
+bool IsDown(u_int8_t k)
 {
-    uint16_t shifted_mask = key_mask;
-    uint8_t key_masked;
-    bool modded;
+    touchPosition pos;
+    uint8_t key;
 
-    for (uint8_t i = 0; i < 16; i++)
-    {
-        key_masked = (key_map[15 - i] & key_mask);
-        modded = key_masked % 2;
+    hidScanInput();
+    hidTouchRead(&pos);
 
-        if (((key_masked == 0) && !modded) || ((key_masked & mod_keys) && modded))
-            return i;
+    if (pos.px == 0 || pos.py == 0)
+        return false;
 
-        shifted_mask >>= 1;
-    }
-
-    return 0;
+    key = pos.px / 80 + (pos.py / 60) * 4;
+    return (k == key);
 }
 
 
@@ -101,6 +103,9 @@ int main(int argc, char **argv)
 {
     // Init gfx
     gfxInitDefault();
+
+    // Botton screen is terminal for printing the touch
+    consoleInit(GFX_BOTTOM, NULL);
 
     // Disable buffer swaping and get buffer
     gfxSetDoubleBuffering(GFX_TOP, false);
@@ -119,6 +124,26 @@ int main(int argc, char **argv)
     // Log file
     FILE *log = fopen("chip8.log", "w");
     if (log == NULL) goto quit;
+
+    // Print bottom screen
+    printf(
+            "|         |         |         |        |\n"
+            "|    1    |    2    |    3    |   C    |\n"
+            "|         |         |         |        |\n"
+            "+---------+---------+---------+--------+\n"
+            "|         |         |         |        |\n"
+            "|    4    |    5    |    6    |   D    |\n"
+            "|         |         |         |        |\n"
+            "+---------+---------+---------+--------+\n"
+            "|         |         |         |        |\n"
+            "|    7    |    8    |    9    |   E    |\n"
+            "|         |         |         |        |\n"
+            "+---------+---------+---------+--------+\n"
+            "|         |         |         |        |\n"
+            "|    A    |    0    |    B    |   F    |\n"
+            "|         |         |         |        |"
+    );
+    
 
     // Main loop
     uint16_t instruction;
@@ -142,6 +167,10 @@ int main(int argc, char **argv)
         // Increment PC
         PC+= 2;
 
+        // Decrement counters if not 0
+        DT = (DT == 0) ? 0 : DT - 1;
+        ST = (ST == 0) ? 0 : ST - 1;
+
         // Print instruction to log 
         fprintf(log, "0x%04hx  %04hx  ", PC, instruction);
 
@@ -153,8 +182,7 @@ int main(int argc, char **argv)
         if (kheld & KEY_START)
             running = false;
         
-
-        // Big boi
+        // Instruction decoder 
         switch (instruction & 0xF000)
         {
             case 0x0000:
@@ -167,7 +195,7 @@ int main(int argc, char **argv)
                     case 0x00E0:            // CLS
                         fprintf(log, "CLS\n");
                         for (int i = 0; i < 400*240; i++)
-                            fb[i] = fb[i + 1] = fb[i + 2] = 0;
+                            fb[i*3] = fb[i*3 + 1] = fb[i*3 + 2] = 0;
                         break;
 
                     case 0x00EE:            // RET
@@ -315,14 +343,14 @@ int main(int argc, char **argv)
             case 0xE000:
                 switch (instruction & 0x00FF)
                 {
-                    case 0x0095:        // SKP Vx
-                        fprintf(log, "SKP V%hx", x);
-                        PC += 2 * (registers[x] == MapKey(kheld));
+                    case 0x009E:        // SKP Vx
+                        fprintf(log, "SKP V%hx\n", x);
+                        PC += 2 * (IsDown(registers[x]));
                         break;
 
                     case 0x00A1:        // SKNP Vx
-                        fprintf(log, "SKNP V%hx", x);
-                        PC += 2 * (registers[x] != MapKey(kheld));
+                        fprintf(log, "SKNP V%hx\n", x);
+                        PC += 2 * (!IsDown(registers[x]));
                         break;
                 }
                 
@@ -337,9 +365,8 @@ int main(int argc, char **argv)
                         break;
 
                     case 0x000A:        // LD Vx, K
-                        fprintf(log, "LD V%hx\n, K", x);
-                        kheld = WaitKey(0xFFFFFFFF);
-                        registers[x] = MapKey(kheld);
+                        fprintf(log, "LD V%hx, K", x);
+                        registers[x] = WaitKey();
                         break;
 
                     case 0x0015:        // LD DT, Vx
@@ -388,14 +415,14 @@ int main(int argc, char **argv)
                 break;
 
             default:
-                fprintf(log, "Invalid opcode: %hx", instruction);
+                fprintf(log, "Invalid opcode: %hx\n", instruction);
                 goto quit;
         }
 
 
         // Flush and Swap 
         gfxFlushBuffers();
-        gfxSwapBuffers();
+        // gfxSwapBuffers();
 
         // Wait for VBlank
         gspWaitForVBlank();
@@ -403,7 +430,6 @@ int main(int argc, char **argv)
     fclose(log);
 
 quit:
-    WaitKey(KEY_SELECT);
     gfxExit();
     return 0;
 }
