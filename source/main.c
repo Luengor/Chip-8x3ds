@@ -34,8 +34,10 @@ uint8_t memory[4096] =
 
 uint8_t registers[16];
 
+uint8_t stack[32];
+
 uint16_t I, PC = 0x200;
-uint8_t DT = 0, ST = 0, C = 0xFF, SP;
+uint8_t DT = 0, ST = 0, C = 0xFF, SP = 0;
 
 
 bool XORpixel(u8* fb, int x, int y)
@@ -113,7 +115,11 @@ int main(int argc, char **argv)
 
     // Read binary from memory
     FILE *file = fopen("chip8-rom.ch8", "rb");
-    if (file == NULL) goto quit;
+    if (file == NULL)
+    {
+        gfxExit();
+        return -1;
+    }
     fseek(file, 0, SEEK_END);
     long size = ftell(file);
     fseek(file, 0, SEEK_SET);
@@ -123,7 +129,11 @@ int main(int argc, char **argv)
 
     // Log file
     FILE *log = fopen("chip8.log", "w");
-    if (log == NULL) goto quit;
+    if (log == NULL)
+    {
+        gfxExit();
+        return -1;
+    }
 
     // Print bottom screen
     printf(
@@ -150,6 +160,7 @@ int main(int argc, char **argv)
     uint16_t nnn;
     uint8_t n, x, y, kk;
     bool running = true;
+    bool valid_opcode = true;
 
     while (aptMainLoop() && running)
     {
@@ -183,6 +194,7 @@ int main(int argc, char **argv)
             running = false;
         
         // Instruction decoder 
+        valid_opcode = true;
         switch (instruction & 0xF000)
         {
             case 0x0000:
@@ -200,15 +212,18 @@ int main(int argc, char **argv)
 
                     case 0x00EE:            // RET
                         fprintf(log, "RET\n");
-                        PC = memory[SP--];
+                        PC = stack[SP--];
                         PC <<= 8;
-                        PC += memory[SP--];
+                        PC += stack[SP--];
                         break;
 
                     case 0x00FD:            // EXIT
                         fprintf(log, "EXIT\n");
                         running = false;
                         break;
+
+                    default:
+                        valid_opcode = false;
                 }
                 break;
 
@@ -220,8 +235,8 @@ int main(int argc, char **argv)
             case 0x2000:                // CALL nnn 
                 fprintf(log, "CALL %04hx\n", nnn);
                 SP += 1;
-                memory[SP++] = PC & 0x00FF;
-                memory[SP]   = PC >> 8;
+                stack[SP++] = PC & 0x00FF;
+                stack[SP]   = PC >> 8;
                 PC = nnn;
                 break;
 
@@ -275,14 +290,14 @@ int main(int argc, char **argv)
 
                     case 0x0004:        // ADD Vx, Vy
                         fprintf(log, "ADD V%hx, V%hx\n", x, y);
-                        registers[0xF] = ((registers[x] + registers[y]) < registers[x]);
+                        registers[0xF] = (((int)registers[x] + registers[y]) > 255); 
                         registers[x] += registers[y];
                         break;
 
                     case 0x0005:        // SUB Vx, Vy
                         fprintf(log, "SUB V%hx, V%hx\n", x, y);
-                        registers[0xF] = registers[x] > registers[y];
-                        registers[x] -= registers[y];
+                        registers[0xF] = registers[x] >= registers[y];
+                        registers[x] = registers[x] - registers[y];
                         break;
 
                     case 0x0006:        // SHR Vx, Vy
@@ -293,7 +308,7 @@ int main(int argc, char **argv)
 
                     case 0x0007:        // SUBN Vx, Vy
                         fprintf(log, "SUBN V%hx, V%hx\n", x, y);
-                        registers[0xF] = registers[x] < registers[y];
+                        registers[0xF] = registers[x] <= registers[y];
                         registers[x] = registers[y] - registers[x];
                         break;
 
@@ -302,6 +317,9 @@ int main(int argc, char **argv)
                         registers[0xF] = (registers[x] >> 7) & 0x01;
                         registers[x] *= 2;
                         break;
+
+                    default:
+                        valid_opcode = false;
                 }
                 break;
 
@@ -333,10 +351,12 @@ int main(int argc, char **argv)
                     uint8_t b = memory[I + _y];
                     for (int _x = 7; _x >= 0; _x--, b>>=1)
                     {
+                        fprintf(log, "%c", b % 2 ? '@' : ' ');
                         if (b % 2 == 0) continue;
                         if (XORpixel(fb, registers[x] + (_x), registers[y] + _y))
                             registers[0xF] = 1;
                     }
+                    fprintf(log, "\n");
                 }
                 break;
 
@@ -352,6 +372,9 @@ int main(int argc, char **argv)
                         fprintf(log, "SKNP V%hx\n", x);
                         PC += 2 * (!IsDown(registers[x]));
                         break;
+
+                    default:
+                        valid_opcode = false;
                 }
                 
                 break;
@@ -411,14 +434,22 @@ int main(int argc, char **argv)
                         for (uint8_t i = 0; i <= x; registers[i] = memory[I + i], i++);
                         break;
 
+                    default:
+                        valid_opcode = false;
+
                 }
                 break;
 
             default:
-                fprintf(log, "Invalid opcode: %hx\n", instruction);
-                goto quit;
+                valid_opcode = false;
+                break;
         }
 
+        if (!valid_opcode)
+        {
+            fprintf(log, "Invalid opcode: %hx\n", instruction);
+            break;
+        }
 
         // Flush and Swap 
         gfxFlushBuffers();
@@ -427,9 +458,8 @@ int main(int argc, char **argv)
         // Wait for VBlank
         gspWaitForVBlank();
     }
-    fclose(log);
 
-quit:
+    fclose(log);
     gfxExit();
     return 0;
 }
